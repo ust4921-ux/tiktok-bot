@@ -29,28 +29,52 @@ from downloader import extract_tiktok_url, download_tiktok_video, cleanup_file
 
 
 class HealthHandler(BaseHTTPRequestHandler):
-    """خادم ويب خفيف للاستجابة لفحوصات الصحة السحابية (Health Checks)."""
+    """خادم ويب خفيف للاستجابة لفحوصات الصحة السحابية (Health Checks على Render وغيرها)."""
     def do_GET(self):
         self.send_response(200)
         self.send_header("Content-type", "text/plain; charset=utf-8")
         self.end_headers()
-        self.wfile.write("TikTok Bot is running 24/7!".encode("utf-8"))
+        self.wfile.write("OK - TikTok Bot is running 24/7!".encode("utf-8"))
+
+    def do_HEAD(self):
+        self.send_response(200)
+        self.send_header("Content-type", "text/plain; charset=utf-8")
+        self.end_headers()
 
     def log_message(self, format, *args):
-        # منع تسجيل طلبات الفحص لإبقاء السجلات نظيفة
+        # منع إغراق السجلات بطلبات الفحص المتكررة
         pass
 
 
 def start_health_server():
-    """تشغيل خادم فحص الصحة في خيط منفصل للاستضافات السحابية (Render, Koyeb, HF)."""
-    port = int(os.getenv("PORT", 8080))
+    """تشغيل خادم فحص الصحة على منفذ 10000 (الافتراضي لرندر) أو المنفذ المحدد."""
+    port = int(os.getenv("PORT", 10000))
     try:
         server = HTTPServer(("0.0.0.0", port), HealthHandler)
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
-        print(f"🌐 خادم فحص الصحة يعمل على المنفذ: {port}")
+        print(f"🌐 خادم فحص الصحة يعمل على 0.0.0.0:{port}")
     except Exception as e:
         print(f"تنبيه بخصوص خادم الصحة: {e}")
+
+
+async def keep_alive_ping():
+    """إرسال طلب ذاتي كل 10 دقائق لضمان عدم نوم سيرفر رندر المجاني."""
+    import asyncio
+    url = os.getenv("RENDER_EXTERNAL_URL")
+    if not url:
+        return
+    print(f"🔄 تفعيل النبض الذاتي لإبقاء السيرفر نشطاً 24/7 على: {url}")
+    await asyncio.sleep(60)
+    while True:
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                res = await client.get(url)
+                print(f"💓 نبضة إبقاء البوت نشطاً نجحت (كود {res.status_code})")
+        except Exception as e:
+            pass
+        await asyncio.sleep(10 * 60)
+
 
 
 # إعداد التسجيل (Logging)
@@ -193,9 +217,15 @@ def main():
 
     print("🚀 جاري تشغيل بوت تحميل تيك توك...")
     start_health_server()
+
+    async def on_startup(app):
+        import asyncio
+        asyncio.create_task(keep_alive_ping())
+
     application = (
         ApplicationBuilder()
         .token(BOT_TOKEN)
+        .post_init(on_startup)
         .concurrent_updates(True)
         .build()
     )
@@ -212,3 +242,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
